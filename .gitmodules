@@ -1,0 +1,3 @@
+[submodule "upstream/RmlUiDoc"]
+	path = upstream/RmlUiDoc
+	url = https://github.com/mikke89/RmlUiDoc.git
