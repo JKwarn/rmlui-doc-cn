@@ -31,14 +31,17 @@ jobs:
           ruby-version: '3.1'
           bundler-cache: false
 
+      - name: Build site source
+        run: ruby _tools/build.rb
+
       - name: Install dependencies
-        working-directory: upstream/RmlUiDoc
+        working-directory: .build/site
         run: |
           bundle config set path "$RUNNER_TEMP/rmlui-bundle"
           bundle install --jobs 4 --retry 3
 
       - name: Build Jekyll
-        working-directory: upstream/RmlUiDoc
+        working-directory: .build/site
         run: bundle exec jekyll build --baseurl "/rmlui-doc-cn"
 
       - name: Setup Pages
@@ -47,7 +50,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: upstream/RmlUiDoc/_site
+          path: .build/site/_site
 
   deploy:
     runs-on: ubuntu-latest
