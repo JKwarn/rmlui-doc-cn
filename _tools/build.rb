@@ -3,6 +3,7 @@ require "fileutils"
 ROOT = File.expand_path("..", __dir__)
 
 UPSTREAM  = File.join(ROOT, "upstream", "RmlUiDoc")
+ZH_CN     = File.join(ROOT, "zh-CN")
 OVERRIDES = File.join(ROOT, "overrides")
 BUILD     = File.join(ROOT, ".build")
 SITE      = File.join(BUILD, "site")
@@ -67,7 +68,40 @@ puts "[build] Copying upstream RmlUiDoc"
 merge_tree(UPSTREAM, SITE)
 
 # ------------------------------------------------------------
-# 4. Apply project overrides
+# 4. Add Chinese documentation
+#
+# Repository:
+#
+#   zh-CN/
+#       cpp_manual.md
+#       cpp_manual/
+#       rcss/
+#       rml/
+#       ...
+#
+# Generated site source:
+#
+#   .build/site/zh-CN/
+#       cpp_manual.md
+#       cpp_manual/
+#       rcss/
+#       rml/
+#       ...
+# ------------------------------------------------------------
+
+if Dir.exist?(ZH_CN)
+  puts "[build] Adding zh-CN documentation"
+  merge_tree(ZH_CN, File.join(SITE, "zh-CN"))
+else
+  puts "[build] No zh-CN directory found"
+end
+
+# ------------------------------------------------------------
+# 5. Apply project overrides
+#
+# Overrides have the same directory structure as the assembled
+# Jekyll site. Files with the same path replace the upstream
+# versions, while unrelated upstream files are preserved.
 # ------------------------------------------------------------
 
 if Dir.exist?(OVERRIDES)
@@ -78,7 +112,7 @@ else
 end
 
 # ------------------------------------------------------------
-# 5. Validate assembled site
+# 6. Validate assembled site
 # ------------------------------------------------------------
 
 required_files = [
@@ -89,6 +123,19 @@ required_files = [
 
 required_files.each do |file|
   abort "[build] Required file missing: #{file}" unless File.exist?(file)
+end
+
+# ------------------------------------------------------------
+# 7. Validate Chinese documentation
+# ------------------------------------------------------------
+
+if Dir.exist?(ZH_CN)
+  assembled_zh_cn = File.join(SITE, "zh-CN")
+
+  abort "[build] Chinese documentation was not assembled: #{assembled_zh_cn}" \
+    unless Dir.exist?(assembled_zh_cn)
+
+  puts "[build] Chinese documentation: #{assembled_zh_cn}"
 end
 
 # ------------------------------------------------------------
