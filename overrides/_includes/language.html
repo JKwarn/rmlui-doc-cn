@@ -3,10 +3,10 @@
 {% if current_path contains 'zh-CN/' %}
     {% assign current_language = 'zh-CN' %}
     {% assign relative_path = current_path | remove_first: 'zh-CN/' %}
-    {% assign counterpart_path = relative_path %}
+    {% assign counterpart_path = 'pages/' | append: relative_path %}
 {% else %}
     {% assign current_language = 'en' %}
-    {% assign relative_path = current_path %}
+    {% assign relative_path = current_path | remove_first: 'pages/' %}
     {% assign counterpart_path = 'zh-CN/' | append: relative_path %}
 {% endif %}
 
