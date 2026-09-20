@@ -55,6 +55,144 @@ function setQueryParam(key, value, replace_state) {
 	}
 }
 
+
+/*
+ * ------------------------------------------------------------
+ * Chinese tokenizer
+ * ------------------------------------------------------------
+ *
+ * Lunr's default trimmer uses \W, which does not work correctly
+ * with Chinese characters in JavaScript.
+ *
+ * The default tokenizer also treats a continuous Chinese sentence
+ * as one token. Here we split CJK text into overlapping bigrams:
+ *
+ *   本地化
+ *   ↓
+ *   本地
+ *   地化
+ *
+ * This allows searches such as:
+ *
+ *   本地化
+ *   本地
+ *   地化
+ *
+ * to match Chinese documentation text.
+ *
+ * ASCII words are kept as normal words.
+ * ------------------------------------------------------------
+ */
+
+function chineseTokenizer(obj, metadata) {
+	if (obj == null)
+		return [];
+
+	var str = obj.toString();
+	var tokens = [];
+
+	/*
+	 * Match:
+	 *
+	 * - CJK Unified Ideographs
+	 * - ASCII letters
+	 * - digits
+	 *
+	 * Other characters are treated as separators.
+	 */
+	var parts = str.match(
+		/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]+|[A-Za-z0-9_]+/g
+	);
+
+	if (!parts)
+		return tokens;
+
+	var position = 0;
+
+	parts.forEach(function (part) {
+
+		/*
+		 * CJK text:
+		 *
+		 *   本地化支持
+		 *
+		 * becomes:
+		 *
+		 *   本地
+		 *   地化
+		 *   化支
+		 *   支持
+		 */
+		if (/^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]+$/.test(part)) {
+
+			if (part.length === 1) {
+				tokens.push(
+					new lunr.Token(
+						part,
+						{
+							position: [position, 1],
+							index: position
+						}
+					)
+				);
+
+				position++;
+				return;
+			}
+
+			for (var i = 0; i < part.length - 1; i++) {
+				tokens.push(
+					new lunr.Token(
+						part.substring(i, i + 2),
+						{
+							position: [position + i, 2],
+							index: position + i
+						}
+					)
+				);
+			}
+
+			position += part.length;
+		}
+
+		/*
+		 * ASCII word:
+		 *
+		 *   RmlUi
+		 *   localisation
+		 *   UTF8
+		 */
+		else {
+			tokens.push(
+				new lunr.Token(
+					part.toLowerCase(),
+					{
+						position: [position, part.length],
+						index: position
+					}
+				)
+			);
+
+			position += part.length;
+		}
+	});
+
+	return tokens;
+}
+
+
+/*
+ * Use our tokenizer instead of Lunr's default tokenizer.
+ */
+chineseTokenizer.separator = /[\s\-]+/;
+
+
+/*
+ * ------------------------------------------------------------
+ * Search index data
+ * ------------------------------------------------------------
+ */
+
 var pages = [
 {% for page in site.pages %}
 	{% if page.path contains 'zh-CN/' %}
@@ -99,10 +237,37 @@ var pages = [
 {% include elements_and_properties.index %}
 ];
 
+
+/*
+ * ------------------------------------------------------------
+ * Build Lunr index
+ * ------------------------------------------------------------
+ */
+
 var idx = lunr(function () {
+
+	/*
+	 * Remove Lunr's default English-oriented processing.
+	 *
+	 * In particular, lunr.trimmer uses \W and can turn Chinese
+	 * tokens into empty strings.
+	 */
+	this.pipeline.remove(lunr.trimmer);
+	this.pipeline.remove(lunr.stopWordFilter);
+	this.pipeline.remove(lunr.stemmer);
+
+	this.searchPipeline.remove(lunr.stemmer);
+
+	/*
+	 * Use our CJK-aware tokenizer.
+	 */
+	this.tokenizer = chineseTokenizer;
+
 	this.ref('id');
+
 	this.field('title', { boost: 10 });
 	this.field('content');
+
 	this.metadataWhitelist = ['position'];
 
 	pages.forEach(function (doc, index) {
@@ -117,7 +282,15 @@ var idx = lunr(function () {
 	}, this)
 });
 
+
+/*
+ * ------------------------------------------------------------
+ * Display search results
+ * ------------------------------------------------------------
+ */
+
 function displaySearchResults(has_search_text, results, pages) {
+
 	function mergePositions(positions, new_positions) {
 		positions = positions.concat(new_positions);
 
@@ -143,50 +316,74 @@ function displaySearchResults(has_search_text, results, pages) {
 		return positions;
 	}
 
+
 	var el_search_results = document.getElementById('search-results');
 
+
 	if (results.length && has_search_text) {
+
 		var results_string = '';
+
 		const max_results = 15;
 		const max_elements_and_properties = 8;
+
 		var num_elements_and_properties = 0;
+
 
 		for (
 			var i = 0;
 			i < results.length && i < max_results + num_elements_and_properties;
 			i++
 		) {
+
 			var item = pages[results[i].ref];
 
 			var title = item.title;
+
 			const summary_length = 200;
+
 			var content = item.content;
+
 			var type = item.type;
 
 			var a_href = '<a href' + '="';
-			var url = a_href + '{{ "" | relative_url }}' + item.url.substr(a_href.length);
+
+			var url =
+				a_href +
+				'{{ "" | relative_url }}' +
+				item.url.substr(a_href.length);
+
 
 			if (type != "page") {
+
 				num_elements_and_properties++;
 
 				if (num_elements_and_properties > max_elements_and_properties)
 					continue;
 			}
 
+
 			var content_positions = [];
 			var title_positions = [];
 
+
 			for (var query in results[i].matchData.metadata) {
-				var match_objects = results[i].matchData.metadata[query];
+
+				var match_objects =
+					results[i].matchData.metadata[query];
+
 
 				if ('content' in match_objects) {
+
 					content_positions = mergePositions(
 						content_positions,
 						match_objects['content'].position
 					);
 				}
 
+
 				if ('title' in match_objects) {
+
 					title_positions = mergePositions(
 						title_positions,
 						match_objects['title'].position
@@ -194,126 +391,192 @@ function displaySearchResults(has_search_text, results, pages) {
 				}
 			}
 
-			function highlightMatches(content, positions, skip_after_index) {
+
+			function highlightMatches(
+				content,
+				positions,
+				skip_after_index
+			) {
+
 				var cursor = 0;
+
 				var new_content = '';
 
+
 				for (var j = 0; j < positions.length; j++) {
+
 					var pos = positions[j];
 
-					if (skip_after_index && pos[0] > skip_after_index)
+					if (
+						skip_after_index &&
+						pos[0] > skip_after_index
+					)
 						break;
+
 
 					new_content +=
 						content.slice(cursor, pos[0]) +
 						'<strong>' +
-						content.slice(pos[0], pos[0] + pos[1]) +
+						content.slice(
+							pos[0],
+							pos[0] + pos[1]
+						) +
 						'</strong>';
+
 
 					cursor = pos[0] + pos[1];
 				}
+
 
 				new_content += content.slice(cursor);
 
 				return new_content;
 			}
 
+
 			if (content_positions.length) {
-				var first_match = content_positions[0][0];
+
+				var first_match =
+					content_positions[0][0];
+
 
 				var summary_begin = Math.max(
 					0,
 					content.lastIndexOf(
 						' ',
-						Math.max(0, first_match - 60)
+						Math.max(
+							0,
+							first_match - 60
+						)
 					)
 				);
 
-				var summary_end = first_match + summary_length;
 
-				var new_content = highlightMatches(
-					content,
-					content_positions,
-					summary_end
-				);
+				var summary_end =
+					first_match + summary_length;
 
-				var i_strong = new_content.indexOf(
-					'</strong>',
-					summary_end
-				);
+
+				var new_content =
+					highlightMatches(
+						content,
+						content_positions,
+						summary_end
+					);
+
+
+				var i_strong =
+					new_content.indexOf(
+						'</strong>',
+						summary_end
+					);
+
 
 				summary_end = Math.max(
-					new_content.indexOf(' ', summary_end),
+					new_content.indexOf(
+						' ',
+						summary_end
+					),
 					i_strong < 0
 						? -1
-						: i_strong + '</strong>'.length
+						: i_strong +
+							'</strong>'.length
 				);
+
 
 				summary_end =
 					summary_end < 0
 						? new_content.length
 						: summary_end;
 
-				content = new_content.slice(
-					summary_begin,
-					summary_end
-				);
+
+				content =
+					new_content.slice(
+						summary_begin,
+						summary_end
+					);
+
 			} else {
-				content = content.substring(
-					0,
-					Math.max(
-						summary_length,
-						content.indexOf(' ', summary_length)
-					)
-				);
+
+				content =
+					content.substring(
+						0,
+						Math.max(
+							summary_length,
+							content.indexOf(
+								' ',
+								summary_length
+							)
+						)
+					);
 			}
+
 
 			if (title_positions.length) {
-				title = highlightMatches(
-					title,
-					title_positions,
-					false
-				);
+
+				title =
+					highlightMatches(
+						title,
+						title_positions,
+						false
+					);
 			}
 
+
 			if (type == "property") {
+
 				results_string +=
-					'<h4 title="RCSS property"><span class="fas">&#xf121;</span>' +
+					'<h4 title="RCSS property">' +
+					'<span class="fas">&#xf121;</span>' +
 					url +
 					'‘' +
 					title +
 					'’ property</a></h4>';
+
 			} else if (type == "element") {
+
 				results_string +=
-					'<h4 title="RML element"><span class="fas">&#xf0ce;</span>' +
+					'<h4 title="RML element">' +
+					'<span class="fas">&#xf0ce;</span>' +
 					url +
 					'&lt;' +
 					title +
 					'&gt; element</a></h4>';
+
 			} else if (type == "pseudo") {
+
 				results_string +=
-					'<h4 title="Pseudo selector"><span class="far">&#xf192;</span>' +
+					'<h4 title="Pseudo selector">' +
+					'<span class="far">&#xf192;</span>' +
 					url +
 					' ‘:' +
 					title +
 					'’ pseudo selector</a></h4>';
+
 			} else {
+
 				results_string +=
 					'<h4>' +
 					url +
 					title +
-					(item.parent_title
-						? ' (' + item.parent_title + ')'
-						: '') +
+					(
+						item.parent_title
+							? ' (' + item.parent_title + ')'
+							: ''
+					) +
 					'</a></h4>';
 
+
 				results_string +=
-					'<p>' + content + '...</p>';
+					'<p>' +
+					content +
+					'...</p>';
 			}
 		}
 
+
 		results_string +=
-			'<p style="text-align: right"><em>显示 ' +
+			'<p style="text-align: right">' +
+			'<em>显示 ' +
 			Math.min(
 				results.length,
 				max_results + num_elements_and_properties
@@ -322,21 +585,40 @@ function displaySearchResults(has_search_text, results, pages) {
 			results.length +
 			' 个结果。</em></p>';
 
-		el_search_results.innerHTML = results_string;
+
+		el_search_results.innerHTML =
+			results_string;
+
 	} else if (has_search_text) {
+
 		el_search_results.innerHTML =
 			'<p><em>没有找到结果。</em></p>';
+
 	} else {
+
 		el_search_results.innerHTML =
 			'<p><em>请输入搜索关键词。</em></p>';
 	}
 }
 
-var el_search_box = document.getElementById('search-box');
+
+/*
+ * ------------------------------------------------------------
+ * Search interaction
+ * ------------------------------------------------------------
+ */
+
+var el_search_box =
+	document.getElementById('search-box');
+
 
 function doSearch() {
-	var search_term = el_search_box.value;
-	var results = idx.search(search_term);
+
+	var search_term =
+		el_search_box.value;
+
+	var results =
+		idx.search(search_term);
 
 	displaySearchResults(
 		Boolean(search_term),
@@ -345,9 +627,11 @@ function doSearch() {
 	);
 }
 
+
 document.getElementById('form-search').addEventListener(
 	"submit",
 	function (e) {
+
 		e.preventDefault();
 
 		doSearch();
@@ -360,9 +644,11 @@ document.getElementById('form-search').addEventListener(
 	}
 );
 
+
 document.getElementById('search-box').addEventListener(
 	"input",
 	function (e) {
+
 		doSearch();
 
 		setQueryParam(
@@ -373,16 +659,24 @@ document.getElementById('search-box').addEventListener(
 	}
 );
 
+
 window.addEventListener(
 	"popstate",
 	function (e) {
-		var search_term = getQueryParam('q');
 
-		el_search_box.value = search_term;
+		var search_term =
+			getQueryParam('q');
+
+		el_search_box.value =
+			search_term;
+
 		doSearch();
 	}
 );
 
-el_search_box.value = getQueryParam('q');
+
+el_search_box.value =
+	getQueryParam('q');
+
 doSearch();
 </script>
