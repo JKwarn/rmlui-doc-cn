@@ -33,7 +33,10 @@
     <div class="navbar">
       <div class="navbar-inner">
         <div class="mycontainer navbar-flex">
-          <a class="brand" href="{{ HOME_URL }}"><img src="{{ ASSETS_PATH }}rmlui_bw.svg" width="24" height="28" alt="RmlUi logo"/> {{ site.title }}</a>
+
+          <a class="brand" href="{{ HOME_URL }}">
+            <img src="{{ ASSETS_PATH }}rmlui_bw.svg" width="24" height="28" alt="RmlUi logo"/> {{ site.title }}
+          </a>
 
           {% assign current_is_zh = false %}
           {% if page.path contains 'zh-CN/' %}
@@ -41,6 +44,7 @@
           {% endif %}
 
           {% if page.parent %}
+
             {% if current_is_zh %}
               {% capture parent_url %}/zh-CN/{{ page.parent }}{% endcapture %}
               {% capture grandparent_url %}/zh-CN/{{ page.grandparent }}{% endcapture %}
@@ -53,111 +57,188 @@
             {% assign next_url = base_url | append: page.next %}
 
             {% for it_page in site.pages %}
+
               {% assign it_is_zh = false %}
               {% if it_page.path contains 'zh-CN/' %}
                 {% assign it_is_zh = true %}
               {% endif %}
 
               {% if it_is_zh == current_is_zh %}
+
                 {% assign it_next_url = it_page.url | split: "/" | pop | join: "/" | append: "/" | append: it_page.next %}
 
                 {% if it_page.url == parent_url %}
                   {% assign parent_page = it_page %}
+
                 {% elsif it_page.url == grandparent_url %}
                   {% assign grandparent_page = it_page %}
+
                 {% elsif it_page.url == next_url %}
                   {% assign next_page = it_page %}
+
                 {% elsif it_next_url == page.url %}
                   {% assign previous_page = it_page %}
                 {% endif %}
+
               {% endif %}
+
             {% endfor %}
+
           {% endif %}
 
           {% if parent_page %}
             <span class="nav hidden-phone">
+
             {% if grandparent_page %}
-              <a href="{{ grandparent_page.url | relative_url }}.html">{{ grandparent_page.title }}</a> <span class="divider">/</span>
+              <a href="{{ grandparent_page.url | relative_url }}.html">
+                {{ grandparent_page.title }}
+              </a>
+              <span class="divider">/</span>
             {% endif %}
+
             {% if parent_page %}
-              <a href="{{ parent_page.url | relative_url }}.html">{{ parent_page.title }}</a>
+              <a href="{{ parent_page.url | relative_url }}.html">
+                {{ parent_page.title }}
+              </a>
             {% endif %}
+
             </span>
           {% endif %}
 
-            <div class="search hidden-phone">
-              <form action="{{ "search.html" | relative_url }}" method="get">
-                <input type="search" placeholder="Search..." name="q">
-                <button type="submit" class="search-button fas">&#xf002;</button>
-              </form>
-            </div>
 
-            <div class="search-phone visible-phone">
-              <a class="search-link fas" href="{{ "search.html" | relative_url }}">&#xf002;</a>
-            </div>
+          <!-- Search -->
+          {% if current_is_zh %}
+            {% assign search_url = "zh-CN/search.html" %}
+          {% else %}
+            {% assign search_url = "search.html" %}
+          {% endif %}
+
+          <div class="search hidden-phone">
+            <form action="{{ search_url | relative_url }}" method="get">
+              <input type="search" placeholder="Search..." name="q">
+              <button type="submit" class="search-button fas">&#xf002;</button>
+            </form>
+          </div>
+
+          <div class="search-phone visible-phone">
+            <a class="search-link fas" href="{{ search_url | relative_url }}">&#xf002;</a>
+          </div>
+
         </div>
       </div>
     </div>
 
+
     <div class="mycontainer">
       <div class="content">
+
         {{ content }}
+
       </div>
+
 
       {% if parent_page %}
+
       <hr>
+
       <div class="row-fluid">
-      <div class="span12">
-        <ul class="pager bottom-nav">
-        {% if previous_page %}
-          <li class="previous">
-            <a href="{{ previous_page.url | relative_url }}.html">{{ previous_page.title }}</a>
-          </li>
-        {% else %}
-          <li class="previous disabled">
-            <a></a>
-          </li>
-        {% endif %}
+        <div class="span12">
 
-          <li class="parent">
-            <a href="{{ parent_page.url | relative_url }}.html">{{ parent_page.title }}</a>
-          </li>
+          <ul class="pager bottom-nav">
 
-        {% if next_page %}
-          <li class="next">
-            <a href="{{ next_page.url | relative_url }}.html">{{ next_page.title }}</a>
-          </li>
-        {% else %}
-          <li class="next disabled">
-            <a></a>
-          </li>
-        {% endif %}
-        </ul>
+          {% if previous_page %}
+
+            <li class="previous">
+              <a href="{{ previous_page.url | relative_url }}.html">
+                {{ previous_page.title }}
+              </a>
+            </li>
+
+          {% else %}
+
+            <li class="previous disabled">
+              <a></a>
+            </li>
+
+          {% endif %}
+
+
+            <li class="parent">
+              <a href="{{ parent_page.url | relative_url }}.html">
+                {{ parent_page.title }}
+              </a>
+            </li>
+
+
+          {% if next_page %}
+
+            <li class="next">
+              <a href="{{ next_page.url | relative_url }}.html">
+                {{ next_page.title }}
+              </a>
+            </li>
+
+          {% else %}
+
+            <li class="next disabled">
+              <a></a>
+            </li>
+
+          {% endif %}
+
+          </ul>
+
+        </div>
       </div>
-      </div>
+
 
       {% elsif page.url != "/" %}
-      <hr>
-      <div class="row-fluid">
-      <div class="span12">
-        <ul class="pager bottom-nav">
-          <li class="parent">
-            <a href="{{ HOME_URL }}">{{ site.title }}</a>
-          </li>
-        </ul>
-      </div>
-      </div>
-      {% endif %}
 
       <hr>
+
+      <div class="row-fluid">
+        <div class="span12">
+
+          <ul class="pager bottom-nav">
+
+            <li class="parent">
+              <a href="{{ HOME_URL }}">
+                {{ site.title }}
+              </a>
+            </li>
+
+          </ul>
+
+        </div>
+      </div>
+
+      {% endif %}
+
+
+      <hr>
+
       <footer>
-        <p><small>
-          {{ page.lib_name }} is licensed under the terms and conditions of the
-          <a href="https://github.com/mikke89/RmlUi/blob/master/LICENSE.txt">MIT license</a>.<br />
-          Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors<br />
-          Copyright (c) 2019-2026 The RmlUi Team, and contributors<br />
-          <a href="{{ page.lib_site }}">{{ page.lib_name }} source code and release packages</a>
-        </small></p>
+        <p>
+          <small>
+
+            {{ page.lib_name }} is licensed under the terms and conditions of the
+            <a href="https://github.com/mikke89/RmlUi/blob/master/LICENSE.txt">
+              MIT license
+            </a>.
+            <br />
+
+            Copyright (c) 2008-2014 CodePoint Ltd, Shift Technology Ltd, and contributors
+            <br />
+
+            Copyright (c) 2019-2026 The RmlUi Team, and contributors
+            <br />
+
+            <a href="{{ page.lib_site }}">
+              {{ page.lib_name }} source code and release packages
+            </a>
+
+          </small>
+        </p>
       </footer>
 
     </div>
