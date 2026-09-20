@@ -34,25 +34,46 @@
       <div class="navbar-inner">
         <div class="mycontainer navbar-flex">
           <a class="brand" href="{{ HOME_URL }}"><img src="{{ ASSETS_PATH }}rmlui_bw.svg" width="24" height="28" alt="RmlUi logo"/> {{ site.title }}</a>
+
+          {% assign current_is_zh = false %}
+          {% if page.path contains 'zh-CN/' %}
+            {% assign current_is_zh = true %}
+          {% endif %}
+
           {% if page.parent %}
-            {% capture parent_url %}/pages/{{ page.parent }}{% endcapture %}
-            {% capture grandparent_url %}/pages/{{ page.grandparent }}{% endcapture %}
+            {% if current_is_zh %}
+              {% capture parent_url %}/zh-CN/{{ page.parent }}{% endcapture %}
+              {% capture grandparent_url %}/zh-CN/{{ page.grandparent }}{% endcapture %}
+            {% else %}
+              {% capture parent_url %}/pages/{{ page.parent }}{% endcapture %}
+              {% capture grandparent_url %}/pages/{{ page.grandparent }}{% endcapture %}
+            {% endif %}
+
             {% assign base_url = page.url | split: "/" | pop | join: "/" | append: "/" %}
             {% assign next_url = base_url | append: page.next %}
 
             {% for it_page in site.pages %}
-              {% assign it_next_url = it_page.url | split: "/" | pop | join: "/" | append: "/" | append: it_page.next %}
-              {% if it_page.url == parent_url %}
-                {% assign parent_page = it_page %}
-              {% elsif it_page.url == grandparent_url %}
-                {% assign grandparent_page = it_page %}
-              {% elsif it_page.url == next_url %}
-                {% assign next_page = it_page %}
-              {% elsif it_next_url == page.url %}
-                {% assign previous_page = it_page %}
+              {% assign it_is_zh = false %}
+              {% if it_page.path contains 'zh-CN/' %}
+                {% assign it_is_zh = true %}
+              {% endif %}
+
+              {% if it_is_zh == current_is_zh %}
+                {% assign it_next_url = it_page.url | split: "/" | pop | join: "/" | append: "/" | append: it_page.next %}
+
+                {% if it_page.url == parent_url %}
+                  {% assign parent_page = it_page %}
+                {% elsif it_page.url == grandparent_url %}
+                  {% assign grandparent_page = it_page %}
+                {% elsif it_page.url == next_url %}
+                  {% assign next_page = it_page %}
+                {% elsif it_next_url == page.url %}
+                  {% assign previous_page = it_page %}
+                {% endif %}
               {% endif %}
             {% endfor %}
           {% endif %}
+
           {% if parent_page %}
             <span class="nav hidden-phone">
             {% if grandparent_page %}
@@ -63,12 +84,14 @@
             {% endif %}
             </span>
           {% endif %}
+
             <div class="search hidden-phone">
               <form action="{{ "search.html" | relative_url }}" method="get">
                 <input type="search" placeholder="Search..." name="q">
                 <button type="submit" class="search-button fas">&#xf002;</button>
               </form>
             </div>
+
             <div class="search-phone visible-phone">
               <a class="search-link fas" href="{{ "search.html" | relative_url }}">&#xf002;</a>
             </div>
@@ -95,9 +118,11 @@
             <a></a>
           </li>
         {% endif %}
+
           <li class="parent">
             <a href="{{ parent_page.url | relative_url }}.html">{{ parent_page.title }}</a>
           </li>
+
         {% if next_page %}
           <li class="next">
             <a href="{{ next_page.url | relative_url }}.html">{{ next_page.title }}</a>
@@ -110,6 +135,7 @@
         </ul>
       </div>
       </div>
+
       {% elsif page.url != "/" %}
       <hr>
       <div class="row-fluid">
