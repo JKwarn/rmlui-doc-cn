@@ -11,6 +11,18 @@
 		<a href="https://github.com/JKwarn/rmlui-doc-cn/blob/main/{{ page.path }}">Edit on GitHub</a>
 	</div>
   {% endif %}
+
+  {% include language.html %}
+  {% if counterpart %}
+    <div class="language-switcher">
+      {% if current_language == 'en' %}
+        <a href="{{ counterpart.url | relative_url }}">中文</a>
+      {% else %}
+        <a href="{{ counterpart.url | relative_url }}">English</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <h2>{{ page.title }} {% if page.tagline %} <small>{{ page.tagline }}</small>{% endif %}</h2>
 </div>
 
