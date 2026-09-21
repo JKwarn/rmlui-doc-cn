@@ -318,24 +318,46 @@ function displaySearchResults(has_search_text, results, pages) {
 			return a[0] - b[0];
 		});
 
-		for (var i = 0; i < positions.length - 1; i++) {
+		var merged_positions = [];
+
+		for (var i = 0; i < positions.length; i++) {
 
 			var pos = positions[i];
-			var pos_next = positions[i + 1];
 
-			if (pos[0] + pos[1] > pos_next[0]) {
+			if (!pos)
+				continue;
 
-				pos[1] = Math.max(
-					pos[1],
-					pos_next[0] + pos_next[1] - pos[0]
+			if (!merged_positions.length) {
+				merged_positions.push([
+					pos[0],
+					pos[1]
+				]);
+				continue;
+			}
+
+			var previous =
+				merged_positions[
+					merged_positions.length - 1
+				];
+
+			if (previous[0] + previous[1] >= pos[0]) {
+
+				previous[1] = Math.max(
+					previous[1],
+					pos[0] + pos[1] - previous[0]
 				);
 
-				delete positions[i + 1];
-				i--;
+			}
+			else {
+
+				merged_positions.push([
+					pos[0],
+					pos[1]
+				]);
 			}
 		}
 
-		return positions;
+		return merged_positions;
 	}
 
 	var el_search_results =
