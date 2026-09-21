@@ -54,7 +54,6 @@ function setQueryParam(key, value, replace_state) {
 	}
 }
 
-
 function isCjkCharacter(ch) {
 	if (!ch)
 		return false;
@@ -62,12 +61,12 @@ function isCjkCharacter(ch) {
 	var code = ch.charCodeAt(0);
 
 	return (
-		(code >= 0x3400 && code <= 0x4DBF) ||   // CJK Extension A
-		(code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified Ideographs
-		(code >= 0xF900 && code <= 0xFAFF) ||   // CJK Compatibility Ideographs
-		(code >= 0x3040 && code <= 0x309F) ||   // Hiragana
-		(code >= 0x30A0 && code <= 0x30FF) ||   // Katakana
-		(code >= 0xAC00 && code <= 0xD7AF)      // Hangul
+		(code >= 0x3400 && code <= 0x4DBF) ||
+		(code >= 0x4E00 && code <= 0x9FFF) ||
+		(code >= 0xF900 && code <= 0xFAFF) ||
+		(code >= 0x3040 && code <= 0x309F) ||
+		(code >= 0x30A0 && code <= 0x30FF) ||
+		(code >= 0xAC00 && code <= 0xD7AF)
 	);
 }
 
@@ -78,16 +77,15 @@ function isAsciiWordCharacter(ch) {
 	var code = ch.charCodeAt(0);
 
 	return (
-		(code >= 0x30 && code <= 0x39) ||   // 0-9
-		(code >= 0x41 && code <= 0x5A) ||   // A-Z
-		(code >= 0x61 && code <= 0x7A) ||   // a-z
+		(code >= 0x30 && code <= 0x39) ||
+		(code >= 0x41 && code <= 0x5A) ||
+		(code >= 0x61 && code <= 0x7A) ||
 		ch === '_' ||
 		ch === '.' ||
 		ch === '+' ||
 		ch === '#'
 	);
 }
-
 
 function tokenizeText(text) {
 	var result = [];
@@ -100,7 +98,6 @@ function tokenizeText(text) {
 	while (i < text.length) {
 		var ch = text.charAt(i);
 
-		
 		if (isCjkCharacter(ch)) {
 			var start = i;
 
@@ -113,15 +110,15 @@ function tokenizeText(text) {
 
 			var cjkText = text.slice(start, i);
 
-			
-			
-			if (cjkText.length >= 2) {
+			if (cjkText.length > 0) {
 				result.push({
 					text: cjkText,
 					start: start,
 					length: cjkText.length
 				});
+			}
 
+			if (cjkText.length >= 2) {
 				for (var j = 0; j < cjkText.length - 1; j++) {
 					result.push({
 						text: cjkText.slice(j, j + 2),
@@ -131,7 +128,6 @@ function tokenizeText(text) {
 				}
 			}
 
-			
 			if (cjkText.length === 1) {
 				result.push({
 					text: cjkText,
@@ -143,7 +139,6 @@ function tokenizeText(text) {
 			continue;
 		}
 
-		
 		if (isAsciiWordCharacter(ch)) {
 			var asciiStart = i;
 
@@ -167,13 +162,11 @@ function tokenizeText(text) {
 			continue;
 		}
 
-		
 		i++;
 	}
 
 	return result;
 }
-
 
 function unifiedLunrTokenizer(obj, metadata) {
 	if (obj == null)
@@ -200,7 +193,6 @@ function unifiedLunrTokenizer(obj, metadata) {
 
 	return tokens;
 }
-
 
 var pages = [
 {% for page in site.pages %}
@@ -236,7 +228,6 @@ var pages = [
 {% include elements_and_properties.index %}
 ];
 
-
 var idx = lunr(function () {
 
 	this.ref('id');
@@ -249,13 +240,9 @@ var idx = lunr(function () {
 
 	this.metadataWhitelist = ['position'];
 
-
-	
 	this.tokenizer = unifiedLunrTokenizer;
 
 	this.pipeline.reset();
-	this.searchPipeline.reset();
-
 
 	pages.forEach(function (doc, index) {
 
@@ -279,8 +266,8 @@ var idx = lunr(function () {
 	}, this);
 });
 
-
 function searchIndex(searchText) {
+
 	var tokens = tokenizeText(searchText);
 
 	if (!tokens.length)
@@ -292,7 +279,10 @@ function searchIndex(searchText) {
 	for (var i = 0; i < tokens.length; i++) {
 		var token = tokens[i].text;
 
-		if (!token || seen[token])
+		if (!token)
+			continue;
+
+		if (seen[token])
 			continue;
 
 		seen[token] = true;
@@ -303,15 +293,20 @@ function searchIndex(searchText) {
 		return [];
 
 	return idx.query(function (query) {
+
 		for (var i = 0; i < uniqueTokens.length; i++) {
-			query.term(uniqueTokens[i], {
-				presence: lunr.Query.presence.REQUIRED,
-				boost: uniqueTokens[i].length >= 2 ? 2 : 1
-			});
+
+			query.term(
+				uniqueTokens[i],
+				{
+					boost: uniqueTokens[i].length >= 2 ? 2 : 1
+				}
+			);
+
 		}
+
 	});
 }
-
 
 function displaySearchResults(has_search_text, results, pages) {
 
@@ -343,15 +338,12 @@ function displaySearchResults(has_search_text, results, pages) {
 		return positions;
 	}
 
-
 	var el_search_results =
 		document.getElementById('search-results');
-
 
 	function insert(str, index, value) {
 		return str.substr(0, index) + value + str.substr(index);
 	}
-
 
 	if (results.length && has_search_text) {
 
@@ -361,7 +353,6 @@ function displaySearchResults(has_search_text, results, pages) {
 		const max_elements_and_properties = 8;
 
 		var num_elements_and_properties = 0;
-
 
 		for (
 			var i = 0;
@@ -379,15 +370,12 @@ function displaySearchResults(has_search_text, results, pages) {
 			var content = item.content;
 			var type = item.type;
 
-
-			
 			var a_href = '<a href' + '="';
 
 			var url =
 				a_href +
 				'{{ "" | relative_url }}' +
 				item.url.substr(a_href.length);
-
 
 			if (type != "page") {
 
@@ -400,10 +388,8 @@ function displaySearchResults(has_search_text, results, pages) {
 					continue;
 			}
 
-
 			var content_positions = [];
 			var title_positions = [];
-
 
 			for (
 				var query in results[i].matchData.metadata
@@ -412,8 +398,10 @@ function displaySearchResults(has_search_text, results, pages) {
 				var match_objects =
 					results[i].matchData.metadata[query];
 
-
-				if ('content' in match_objects) {
+				if (
+					'content' in match_objects &&
+					match_objects['content'].position
+				) {
 
 					content_positions =
 						mergePositions(
@@ -422,8 +410,10 @@ function displaySearchResults(has_search_text, results, pages) {
 						);
 				}
 
-
-				if ('title' in match_objects) {
+				if (
+					'title' in match_objects &&
+					match_objects['title'].position
+				) {
 
 					title_positions =
 						mergePositions(
@@ -433,7 +423,6 @@ function displaySearchResults(has_search_text, results, pages) {
 				}
 			}
 
-
 			function highlightMatches(
 				content,
 				positions,
@@ -442,7 +431,6 @@ function displaySearchResults(has_search_text, results, pages) {
 
 				var cursor = 0;
 				var new_content = "";
-
 
 				for (
 					var j = 0;
@@ -458,7 +446,6 @@ function displaySearchResults(has_search_text, results, pages) {
 					)
 						break;
 
-
 					new_content +=
 						content.slice(cursor, pos[0]) +
 						'<strong>' +
@@ -468,22 +455,18 @@ function displaySearchResults(has_search_text, results, pages) {
 						) +
 						'</strong>';
 
-
 					cursor = pos[0] + pos[1];
 				}
-
 
 				new_content += content.slice(cursor);
 
 				return new_content;
 			}
 
-
 			if (content_positions.length) {
 
 				var first_match =
 					content_positions[0][0];
-
 
 				var summary_begin =
 					Math.max(
@@ -494,10 +477,8 @@ function displaySearchResults(has_search_text, results, pages) {
 						)
 					);
 
-
 				var summary_end =
 					first_match + summary_length;
-
 
 				var new_content =
 					highlightMatches(
@@ -506,13 +487,11 @@ function displaySearchResults(has_search_text, results, pages) {
 						summary_end
 					);
 
-
 				var i_strong =
 					new_content.indexOf(
 						'</strong>',
 						summary_end
 					);
-
 
 				summary_end =
 					Math.max(
@@ -525,12 +504,10 @@ function displaySearchResults(has_search_text, results, pages) {
 							: i_strong + '</strong>'.length
 					);
 
-
 				summary_end =
 					summary_end < 0
 						? new_content.length
 						: summary_end;
-
 
 				content =
 					new_content.slice(
@@ -554,7 +531,6 @@ function displaySearchResults(has_search_text, results, pages) {
 					);
 			}
 
-
 			if (title_positions.length) {
 
 				title =
@@ -564,7 +540,6 @@ function displaySearchResults(has_search_text, results, pages) {
 						false
 					);
 			}
-
 
 			if (type == "property") {
 
@@ -612,14 +587,12 @@ function displaySearchResults(has_search_text, results, pages) {
 					) +
 					'</a></h4>';
 
-
 				results_string +=
 					'<p>' +
 					content +
 					'...</p>';
 			}
 		}
-
 
 		results_string +=
 			'<p style="text-align: right">' +
@@ -638,7 +611,6 @@ function displaySearchResults(has_search_text, results, pages) {
 			) +
 			'.</em></p>';
 
-
 		el_search_results.innerHTML =
 			results_string;
 
@@ -656,20 +628,16 @@ function displaySearchResults(has_search_text, results, pages) {
 	}
 }
 
-
 var el_search_box =
 	document.getElementById('search-box');
-
 
 function doSearch() {
 
 	var search_term =
 		el_search_box.value;
 
-
 	var results =
 		searchIndex(search_term);
-
 
 	displaySearchResults(
 		Boolean(search_term),
@@ -677,7 +645,6 @@ function doSearch() {
 		pages
 	);
 }
-
 
 document
 	.getElementById('form-search')
@@ -697,7 +664,6 @@ document
 		}
 	);
 
-
 document
 	.getElementById('search-box')
 	.addEventListener(
@@ -714,7 +680,6 @@ document
 		}
 	);
 
-
 window.addEventListener(
 	"popstate",
 	function (e) {
@@ -728,7 +693,6 @@ window.addEventListener(
 		doSearch();
 	}
 );
-
 
 el_search_box.value =
 	getQueryParam('q');
