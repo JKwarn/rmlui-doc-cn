@@ -55,37 +55,6 @@ function setQueryParam(key, value, replace_state) {
 }
 
 
-/*
- * --------------------------------------------------------------------------
- * Unified tokenizer
- * --------------------------------------------------------------------------
- *
- * Lunr 默认 tokenizer / trimmer 对 CJK 文本并不适合。
- *
- * 这里不修改 lunr.js，而是在 search.md 中定义自己的 tokenizer。
- *
- * CJK 文本：
- *
- *   "本地化"
- *
- * 会产生：
- *
- *   本地化
- *   本地
- *   地化
- *
- * 因此：
- *
- *   本地化  -> 可以命中
- *   本地    -> 可以命中
- *   地化    -> 可以命中
- *
- * 对连续中文文本还保留完整字符串 token，因此搜索完整短语时
- * 可以获得更高的相关性。
- *
- * ASCII / 数字 / 英文仍按照连续字符串处理。
- */
-
 function isCjkCharacter(ch) {
 	if (!ch)
 		return false;
@@ -120,19 +89,6 @@ function isAsciiWordCharacter(ch) {
 }
 
 
-/*
- * 返回普通字符串 token。
- *
- * 每个 token：
- *
- *   {
- *       text:     token 文本
- *       start:    在原始字符串中的起始位置
- *       length:   token 长度
- *   }
- *
- * 位置必须保留，因为后面的 Lunr 搜索结果高亮依赖 metadata.position。
- */
 function tokenizeText(text) {
 	var result = [];
 
@@ -144,9 +100,7 @@ function tokenizeText(text) {
 	while (i < text.length) {
 		var ch = text.charAt(i);
 
-		/*
-		 * CJK
-		 */
+		
 		if (isCjkCharacter(ch)) {
 			var start = i;
 
@@ -159,32 +113,8 @@ function tokenizeText(text) {
 
 			var cjkText = text.slice(start, i);
 
-			/*
-			 * 完整 CJK 连续文本。
-			 *
-			 * 例如：
-			 *   本地化
-			 */
-			if (cjkText.length > 0) {
-				result.push({
-					text: cjkText,
-					start: start,
-					length: cjkText.length
-				});
-			}
-
-			/*
-			 * CJK bigram。
-			 *
-			 * 例如：
-			 *
-			 *   本地化
-			 *
-			 * -> 本地
-			 * -> 地化
-			 *
-			 * 这样搜索任意连续中文片段都可以命中。
-			 */
+			
+			
 			if (cjkText.length >= 2) {
 				for (var j = 0; j < cjkText.length - 1; j++) {
 					result.push({
@@ -195,11 +125,7 @@ function tokenizeText(text) {
 				}
 			}
 
-			/*
-			 * 单字符中文也建立 token。
-			 *
-			 * 这样单字搜索仍然有效。
-			 */
+			
 			if (cjkText.length === 1) {
 				result.push({
 					text: cjkText,
@@ -211,9 +137,7 @@ function tokenizeText(text) {
 			continue;
 		}
 
-		/*
-		 * ASCII / 数字 / 常见代码字符。
-		 */
+		
 		if (isAsciiWordCharacter(ch)) {
 			var asciiStart = i;
 
@@ -237,9 +161,7 @@ function tokenizeText(text) {
 			continue;
 		}
 
-		/*
-		 * 其它字符作为分隔符。
-		 */
+		
 		i++;
 	}
 
@@ -247,23 +169,6 @@ function tokenizeText(text) {
 }
 
 
-/*
- * Lunr tokenizer。
- *
- * 注意：
- * 这里明确不使用 lunr 默认的 trimmer。
- *
- * 因为 Lunr 2.3.9 的默认 trimmer：
- *
- *   /^\W+/
- *   /\W+$/
- *
- * 会把中文字符当成非 ASCII word character，从而导致：
- *
- *   本地化 -> ""
- *
- * 这正是之前中文搜索完全失效的根本原因。
- */
 function unifiedLunrTokenizer(obj, metadata) {
 	if (obj == null)
 		return [];
@@ -290,12 +195,6 @@ function unifiedLunrTokenizer(obj, metadata) {
 	return tokens;
 }
 
-
-/*
- * --------------------------------------------------------------------------
- * Pages
- * --------------------------------------------------------------------------
- */
 
 var pages = [
 {% for page in site.pages %}
@@ -332,12 +231,6 @@ var pages = [
 ];
 
 
-/*
- * --------------------------------------------------------------------------
- * Lunr index
- * --------------------------------------------------------------------------
- */
-
 var idx = lunr(function () {
 
 	this.ref('id');
@@ -351,23 +244,11 @@ var idx = lunr(function () {
 	this.metadataWhitelist = ['position'];
 
 
-	/*
-	 * 使用统一 tokenizer。
-	 *
-	 * 这里必须显式替换 Builder tokenizer。
-	 *
-	 * 同时清空默认 pipeline：
-	 *
-	 *   tokenizer
-	 *   trimmer
-	 *   stopWordFilter
-	 *   stemmer
-	 *
-	 * 默认 trimmer 会破坏中文。
-	 */
+	
 	this.tokenizer = unifiedLunrTokenizer;
 
 	this.pipeline.reset();
+	this.searchPipeline.reset();
 
 
 	pages.forEach(function (doc, index) {
@@ -393,114 +274,38 @@ var idx = lunr(function () {
 });
 
 
-/*
- * --------------------------------------------------------------------------
- * Query tokenizer
- * --------------------------------------------------------------------------
- *
- * 关键点：
- *
- * 不再：
- *
- *   idx.search(search_term)
- *
- * 因为 idx.search() 会让 Lunr 默认 QueryParser 解析查询字符串，
- * 它不会调用上面 Builder 的 tokenizer。
- *
- * 所以：
- *
- *   索引：unifiedLunrTokenizer()
- *   查询：tokenizeText()
- *
- * 两边使用完全相同的 token 规则。
- */
-
 function searchIndex(searchText) {
-
 	var tokens = tokenizeText(searchText);
 
 	if (!tokens.length)
 		return [];
 
-
-	/*
-	 * 去除完全重复的 token。
-	 *
-	 * 例如连续文本中某些情况下可能生成重复 token。
-	 */
 	var uniqueTokens = [];
 	var seen = {};
 
 	for (var i = 0; i < tokens.length; i++) {
 		var token = tokens[i].text;
 
-		if (!token)
-			continue;
-
-		if (seen[token])
+		if (!token || seen[token])
 			continue;
 
 		seen[token] = true;
 		uniqueTokens.push(token);
 	}
 
-
 	if (!uniqueTokens.length)
 		return [];
 
-
-	/*
-	 * 直接使用 Lunr Query API。
-	 *
-	 * 每个 token 都作为一个普通 OR 查询项。
-	 *
-	 * 这样：
-	 *
-	 *   本地
-	 *
-	 * 可以命中：
-	 *
-	 *   本地化
-	 *
-	 * 因为索引中存在：
-	 *
-	 *   本地
-	 *   地化
-	 *
-	 * 而：
-	 *
-	 *   本地化
-	 *
-	 * 同时存在：
-	 *
-	 *   本地化
-	 *   本地
-	 *   地化
-	 *
-	 * 完整 token 的 TF/匹配效果会自然提高相关性。
-	 */
 	return idx.query(function (query) {
-
 		for (var i = 0; i < uniqueTokens.length; i++) {
-
-			query.term(
-				uniqueTokens[i],
-				{
-					boost: uniqueTokens[i].length >= 2 ? 2 : 1
-				}
-			);
-
+			query.term(uniqueTokens[i], {
+				presence: lunr.Query.presence.REQUIRED,
+				boost: uniqueTokens[i].length >= 2 ? 2 : 1
+			});
 		}
-
 	});
 }
 
-
-/*
- * --------------------------------------------------------------------------
- * Result rendering
- * --------------------------------------------------------------------------
- */
 
 function displaySearchResults(has_search_text, results, pages) {
 
@@ -569,10 +374,7 @@ function displaySearchResults(has_search_text, results, pages) {
 			var type = item.type;
 
 
-			/*
-			 * Split up the href string so that the offline documentation
-			 * generator does not rewrite the link.
-			 */
+			
 			var a_href = '<a href' + '="';
 
 			var url =
@@ -848,12 +650,6 @@ function displaySearchResults(has_search_text, results, pages) {
 	}
 }
 
-
-/*
- * --------------------------------------------------------------------------
- * Search events
- * --------------------------------------------------------------------------
- */
 
 var el_search_box =
 	document.getElementById('search-box');
