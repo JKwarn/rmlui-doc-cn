@@ -116,6 +116,12 @@ function tokenizeText(text) {
 			
 			
 			if (cjkText.length >= 2) {
+				result.push({
+					text: cjkText,
+					start: start,
+					length: cjkText.length
+				});
+
 				for (var j = 0; j < cjkText.length - 1; j++) {
 					result.push({
 						text: cjkText.slice(j, j + 2),
