@@ -1,14 +1,14 @@
 ---
 layout: page
-title: 搜索
+title: Search
 include_in_search_results: false
 ---
 
 <script src="{{ "/assets/scripts/lunr.js" | relative_url }}"></script>
 
 <form style="text-align: center" id="form-search" class="form-search" action="" method="get">
-  <input type="search" class="input-medium search-query" id="search-box" placeholder="搜索..." name="q">
-  <input type="submit" class="btn" value="搜索">
+  <input type="search" class="input-medium search-query" id="search-box" placeholder="Search..." name="q">
+  <input type="submit" class="btn" value="Search">
 </form>
 
 ---
@@ -16,13 +16,6 @@ include_in_search_results: false
 <div id="search-results"></div>
 
 <script>
-
-/*
- * ============================================================
- * Query string helpers
- * ============================================================
- */
-
 function getQueryParam(variable) {
 	var query = window.location.search.substring(1);
 	var vars = query.split('&');
@@ -31,15 +24,11 @@ function getQueryParam(variable) {
 		var pair = vars[i].split('=');
 
 		if (pair[0] === variable) {
-			return decodeURIComponent(
-				pair[1].replace(/\+/g, '%20')
-			);
+			return decodeURIComponent(pair[1].replace(/\+/g, '%20'));
 		}
 	}
-
 	return '';
 }
-
 
 function setQueryParam(key, value, replace_state) {
 	if (typeof(URLSearchParams) != "undefined" && history.pushState) {
@@ -67,12 +56,37 @@ function setQueryParam(key, value, replace_state) {
 
 
 /*
- * ============================================================
- * Character classification
- * ============================================================
+ * --------------------------------------------------------------------------
+ * Unified tokenizer
+ * --------------------------------------------------------------------------
+ *
+ * Lunr 默认 tokenizer / trimmer 对 CJK 文本并不适合。
+ *
+ * 这里不修改 lunr.js，而是在 search.md 中定义自己的 tokenizer。
+ *
+ * CJK 文本：
+ *
+ *   "本地化"
+ *
+ * 会产生：
+ *
+ *   本地化
+ *   本地
+ *   地化
+ *
+ * 因此：
+ *
+ *   本地化  -> 可以命中
+ *   本地    -> 可以命中
+ *   地化    -> 可以命中
+ *
+ * 对连续中文文本还保留完整字符串 token，因此搜索完整短语时
+ * 可以获得更高的相关性。
+ *
+ * ASCII / 数字 / 英文仍按照连续字符串处理。
  */
 
-function isCJKChar(ch) {
+function isCjkCharacter(ch) {
 	if (!ch)
 		return false;
 
@@ -80,287 +94,197 @@ function isCJKChar(ch) {
 
 	return (
 		(code >= 0x3400 && code <= 0x4DBF) ||   // CJK Extension A
-		(code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified
-		(code >= 0xF900 && code <= 0xFAFF)      // CJK Compatibility
+		(code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified Ideographs
+		(code >= 0xF900 && code <= 0xFAFF) ||   // CJK Compatibility Ideographs
+		(code >= 0x3040 && code <= 0x309F) ||   // Hiragana
+		(code >= 0x30A0 && code <= 0x30FF) ||   // Katakana
+		(code >= 0xAC00 && code <= 0xD7AF)      // Hangul
+	);
+}
+
+function isAsciiWordCharacter(ch) {
+	if (!ch)
+		return false;
+
+	var code = ch.charCodeAt(0);
+
+	return (
+		(code >= 0x30 && code <= 0x39) ||   // 0-9
+		(code >= 0x41 && code <= 0x5A) ||   // A-Z
+		(code >= 0x61 && code <= 0x7A) ||   // a-z
+		ch === '_' ||
+		ch === '.' ||
+		ch === '+' ||
+		ch === '#'
 	);
 }
 
 
 /*
- * ============================================================
- * CJK tokenizer
- * ============================================================
+ * 返回普通字符串 token。
  *
- * Lunr 2.3.9's default tokenizer/trimmer is designed primarily
- * for Latin text. In particular, lunr.trimmer uses \W, which
- * causes Chinese characters to be removed.
+ * 每个 token：
  *
- * This tokenizer therefore completely bypasses Lunr's default
- * tokenizer/trimmer/stemmer.
+ *   {
+ *       text:     token 文本
+ *       start:    在原始字符串中的起始位置
+ *       length:   token 长度
+ *   }
  *
- * Strategy:
- *
- *   1. ASCII words/numbers are indexed as normal tokens.
- *
- *   2. Chinese text uses Intl.Segmenter when available.
- *      This provides browser-native Chinese word segmentation.
- *
- *   3. Every continuous CJK run also generates overlapping
- *      character bigrams.
- *
- *      本地化
- *        -> 本地
- *        -> 地化
- *
- *      加载字体
- *        -> 加载
- *        -> 载字
- *        -> 字体
- *
- *      This guarantees that searches do not depend entirely
- *      on the quality of the dictionary used by Segmenter.
- *
- *   4. The complete segmented word is retained as a token.
- *
- *      本地化
- *        -> 本地化
- *        -> 本地
- *        -> 地化
- *
- *   Therefore both word-oriented and partial searches work.
- * ============================================================
+ * 位置必须保留，因为后面的 Lunr 搜索结果高亮依赖 metadata.position。
  */
+function tokenizeText(text) {
+	var result = [];
 
-function chineseTokenizer(obj, metadata) {
-	if (obj == null)
-		return [];
-
-	var str = obj.toString();
-
-	var tokens = [];
-
-	var position = 0;
-
-
-	function addToken(text, start, length) {
-		if (!text)
-			return;
-
-		tokens.push(
-			new lunr.Token(
-				text.toLowerCase(),
-				{
-					position: [start, length],
-					index: start
-				}
-			)
-		);
-	}
-
-
-	/*
-	 * ------------------------------------------------------------
-	 * Process one continuous CJK run.
-	 * ------------------------------------------------------------
-	 */
-
-	function processCJKRun(text, startOffset) {
-
-		/*
-		 * First add the words generated by the browser's
-		 * Chinese segmenter when available.
-		 */
-		if (
-			typeof Intl !== "undefined" &&
-			typeof Intl.Segmenter === "function"
-		) {
-			try {
-				var segmenter = new Intl.Segmenter(
-					'zh',
-					{
-						granularity: 'word'
-					}
-				);
-
-				var segments =
-					segmenter.segment(text);
-
-				for (var item of segments) {
-
-					if (!item.isWordLike)
-						continue;
-
-					var segmentText = item.segment;
-
-					/*
-					 * Only add actual CJK words here.
-					 */
-					var hasCJK = false;
-
-					for (var c = 0; c < segmentText.length; c++) {
-						if (isCJKChar(segmentText[c])) {
-							hasCJK = true;
-							break;
-						}
-					}
-
-					if (!hasCJK)
-						continue;
-
-					addToken(
-						segmentText,
-						startOffset + item.index,
-						segmentText.length
-					);
-				}
-
-			} catch (e) {
-				/*
-				 * Segmenter is optional.
-				 *
-				 * The bigram fallback below is always used,
-				 * so search remains functional.
-				 */
-			}
-		}
-
-
-		/*
-		 * --------------------------------------------------------
-		 * Always add CJK unigrams and bigrams.
-		 *
-		 * This makes the search independent from a dictionary.
-		 * --------------------------------------------------------
-		 */
-
-		for (var i = 0; i < text.length; i++) {
-
-			var current = text[i];
-
-			if (!isCJKChar(current))
-				continue;
-
-
-			/*
-			 * Single-character token.
-			 *
-			 * Useful for one-character searches.
-			 */
-			addToken(
-				current,
-				startOffset + i,
-				1
-			);
-
-
-			/*
-			 * Two-character token.
-			 *
-			 * Example:
-			 *
-			 *   本地化
-			 *
-			 * becomes:
-			 *
-			 *   本地
-			 *   地化
-			 */
-			if (i + 1 < text.length) {
-
-				var next = text[i + 1];
-
-				if (isCJKChar(next)) {
-					addToken(
-						current + next,
-						startOffset + i,
-						2
-					);
-				}
-			}
-		}
-	}
-
-
-	/*
-	 * ------------------------------------------------------------
-	 * Scan the complete input.
-	 * ------------------------------------------------------------
-	 */
+	if (!text)
+		return result;
 
 	var i = 0;
 
-	while (i < str.length) {
-
-		var ch = str[i];
-
+	while (i < text.length) {
+		var ch = text.charAt(i);
 
 		/*
-		 * CJK run.
+		 * CJK
 		 */
-		if (isCJKChar(ch)) {
-
+		if (isCjkCharacter(ch)) {
 			var start = i;
 
-			i++;
-
 			while (
-				i < str.length &&
-				isCJKChar(str[i])
+				i < text.length &&
+				isCjkCharacter(text.charAt(i))
 			) {
 				i++;
 			}
 
-			processCJKRun(
-				str.substring(start, i),
-				start
-			);
+			var cjkText = text.slice(start, i);
 
-			position = i;
+			/*
+			 * 完整 CJK 连续文本。
+			 *
+			 * 例如：
+			 *   本地化
+			 */
+			if (cjkText.length > 0) {
+				result.push({
+					text: cjkText,
+					start: start,
+					length: cjkText.length
+				});
+			}
+
+			/*
+			 * CJK bigram。
+			 *
+			 * 例如：
+			 *
+			 *   本地化
+			 *
+			 * -> 本地
+			 * -> 地化
+			 *
+			 * 这样搜索任意连续中文片段都可以命中。
+			 */
+			if (cjkText.length >= 2) {
+				for (var j = 0; j < cjkText.length - 1; j++) {
+					result.push({
+						text: cjkText.slice(j, j + 2),
+						start: start + j,
+						length: 2
+					});
+				}
+			}
+
+			/*
+			 * 单字符中文也建立 token。
+			 *
+			 * 这样单字搜索仍然有效。
+			 */
+			if (cjkText.length === 1) {
+				result.push({
+					text: cjkText,
+					start: start,
+					length: 1
+				});
+			}
 
 			continue;
 		}
 
-
 		/*
-		 * ASCII word / number.
-		 *
-		 * Keep normal identifiers such as:
-		 *
-		 *   RmlUi
-		 *   UTF-8
-		 *   C++11
-		 *   123
+		 * ASCII / 数字 / 常见代码字符。
 		 */
-		if (/[A-Za-z0-9_]/.test(ch)) {
-
+		if (isAsciiWordCharacter(ch)) {
 			var asciiStart = i;
 
-			i++;
-
 			while (
-				i < str.length &&
-				/[A-Za-z0-9_]/.test(str[i])
+				i < text.length &&
+				isAsciiWordCharacter(text.charAt(i))
 			) {
 				i++;
 			}
 
-			addToken(
-				str.substring(asciiStart, i),
-				asciiStart,
-				i - asciiStart
-			);
+			var asciiText = text.slice(asciiStart, i);
 
-			position = i;
+			if (asciiText.length > 0) {
+				result.push({
+					text: asciiText.toLowerCase(),
+					start: asciiStart,
+					length: asciiText.length
+				});
+			}
 
 			continue;
 		}
 
-
 		/*
-		 * Separators / punctuation.
+		 * 其它字符作为分隔符。
 		 */
 		i++;
-		position = i;
+	}
+
+	return result;
+}
+
+
+/*
+ * Lunr tokenizer。
+ *
+ * 注意：
+ * 这里明确不使用 lunr 默认的 trimmer。
+ *
+ * 因为 Lunr 2.3.9 的默认 trimmer：
+ *
+ *   /^\W+/
+ *   /\W+$/
+ *
+ * 会把中文字符当成非 ASCII word character，从而导致：
+ *
+ *   本地化 -> ""
+ *
+ * 这正是之前中文搜索完全失效的根本原因。
+ */
+function unifiedLunrTokenizer(obj, metadata) {
+	if (obj == null)
+		return [];
+
+	var text = obj.toString();
+	var parts = tokenizeText(text);
+	var tokens = [];
+
+	for (var i = 0; i < parts.length; i++) {
+		var part = parts[i];
+
+		tokens.push(
+			new lunr.Token(
+				part.text,
+				{
+					position: [part.start, part.length],
+					index: i,
+					original: text
+				}
+			)
+		);
 	}
 
 	return tokens;
@@ -368,34 +292,26 @@ function chineseTokenizer(obj, metadata) {
 
 
 /*
- * ============================================================
- * Search documents
- * ============================================================
+ * --------------------------------------------------------------------------
+ * Pages
+ * --------------------------------------------------------------------------
  */
 
 var pages = [
 {% for page in site.pages %}
-	{% if page.path contains 'zh-CN/' %}
 	{% if page.include_in_search_results and page.title %}
-
-		{% assign relative_page_path = page.path | remove_first: 'zh-CN/' %}
-		{% capture parent_path %}zh-CN/{{ page.parent }}{% endcapture %}
-		{% capture grandparent_path %}zh-CN/{{ page.grandparent }}{% endcapture %}
-
-		{% assign parent_url = "" %}
-		{% assign grandparent_url = "" %}
+		{% capture parent_url %}/pages/{{ page.parent }}{% endcapture %}
+		{% capture grandparent_url %}/pages/{{ page.grandparent }}{% endcapture %}
 		{% assign parent_title = "" %}
 		{% assign grandparent_title = "" %}
 
 		{% for it_page in site.pages %}
-			{% if it_page.path == parent_path %}
+			{% if it_page.url == parent_url %}
 				{% assign parent_title = it_page.short_title | default: it_page.title %}
-				{% assign parent_url = it_page.url %}
 			{% endif %}
 
-			{% if it_page.path == grandparent_path %}
+			{% if it_page.url == grandparent_url %}
 				{% assign grandparent_title = it_page.short_title | default: it_page.title %}
-				{% assign grandparent_url = it_page.url %}
 			{% endif %}
 		{% endfor %}
 
@@ -404,44 +320,25 @@ var pages = [
 		{% endif %}
 
 		{
-			"type": "page",
-			"title": "{{ page.title }}",
-			"url": '<a href="{{ page.url }}.html">',
-			"parent_title": "{{ parent_title }}",
-			"content": "{{ page.content | markdownify | strip_html | replace: '"', " " | replace: "\", " " | normalize_whitespace }}"
+		"type": "page",
+		"title": "{{ page.title }}",
+		"url": '<a href="{{ page.url }}.html">',
+		"parent_title": "{{ parent_title }}",
+		"content": "{{ page.content | markdownify | strip_html | replace: '"', " " | replace: "\", " " | normalize_whitespace }}"
 		},
 	{% endif %}
-	{% endif %}
 {% endfor %}
-
 {% include elements_and_properties.index %}
 ];
 
 
 /*
- * ============================================================
- * Build Lunr index
- * ============================================================
+ * --------------------------------------------------------------------------
+ * Lunr index
+ * --------------------------------------------------------------------------
  */
 
 var idx = lunr(function () {
-
-	/*
-	 * Remove Lunr's default Latin-oriented processing.
-	 *
-	 * Most importantly, lunr.trimmer would remove Chinese
-	 * characters because it uses JavaScript \W.
-	 */
-	this.pipeline.remove(lunr.trimmer);
-	this.pipeline.remove(lunr.stopWordFilter);
-	this.pipeline.remove(lunr.stemmer);
-
-	this.searchPipeline.remove(lunr.stemmer);
-
-	/*
-	 * Use the CJK-aware tokenizer above.
-	 */
-	this.tokenizer = chineseTokenizer;
 
 	this.ref('id');
 
@@ -454,11 +351,30 @@ var idx = lunr(function () {
 	this.metadataWhitelist = ['position'];
 
 
+	/*
+	 * 使用统一 tokenizer。
+	 *
+	 * 这里必须显式替换 Builder tokenizer。
+	 *
+	 * 同时清空默认 pipeline：
+	 *
+	 *   tokenizer
+	 *   trimmer
+	 *   stopWordFilter
+	 *   stemmer
+	 *
+	 * 默认 trimmer 会破坏中文。
+	 */
+	this.tokenizer = unifiedLunrTokenizer;
+
+	this.pipeline.reset();
+
+
 	pages.forEach(function (doc, index) {
 
 		doc['id'] = index;
 
-		let type = doc['type'];
+		var type = doc['type'];
 
 		if (
 			type == 'element' ||
@@ -468,7 +384,8 @@ var idx = lunr(function () {
 			this.add(doc, {
 				boost: 10
 			});
-		} else {
+		}
+		else {
 			this.add(doc);
 		}
 
@@ -477,48 +394,137 @@ var idx = lunr(function () {
 
 
 /*
- * ============================================================
- * Display search results
- * ============================================================
+ * --------------------------------------------------------------------------
+ * Query tokenizer
+ * --------------------------------------------------------------------------
+ *
+ * 关键点：
+ *
+ * 不再：
+ *
+ *   idx.search(search_term)
+ *
+ * 因为 idx.search() 会让 Lunr 默认 QueryParser 解析查询字符串，
+ * 它不会调用上面 Builder 的 tokenizer。
+ *
+ * 所以：
+ *
+ *   索引：unifiedLunrTokenizer()
+ *   查询：tokenizeText()
+ *
+ * 两边使用完全相同的 token 规则。
  */
 
-function displaySearchResults(
-	has_search_text,
-	results,
-	pages
-) {
+function searchIndex(searchText) {
 
-	function mergePositions(
-		positions,
-		new_positions
-	) {
+	var tokens = tokenizeText(searchText);
+
+	if (!tokens.length)
+		return [];
+
+
+	/*
+	 * 去除完全重复的 token。
+	 *
+	 * 例如连续文本中某些情况下可能生成重复 token。
+	 */
+	var uniqueTokens = [];
+	var seen = {};
+
+	for (var i = 0; i < tokens.length; i++) {
+		var token = tokens[i].text;
+
+		if (!token)
+			continue;
+
+		if (seen[token])
+			continue;
+
+		seen[token] = true;
+		uniqueTokens.push(token);
+	}
+
+
+	if (!uniqueTokens.length)
+		return [];
+
+
+	/*
+	 * 直接使用 Lunr Query API。
+	 *
+	 * 每个 token 都作为一个普通 OR 查询项。
+	 *
+	 * 这样：
+	 *
+	 *   本地
+	 *
+	 * 可以命中：
+	 *
+	 *   本地化
+	 *
+	 * 因为索引中存在：
+	 *
+	 *   本地
+	 *   地化
+	 *
+	 * 而：
+	 *
+	 *   本地化
+	 *
+	 * 同时存在：
+	 *
+	 *   本地化
+	 *   本地
+	 *   地化
+	 *
+	 * 完整 token 的 TF/匹配效果会自然提高相关性。
+	 */
+	return idx.query(function (query) {
+
+		for (var i = 0; i < uniqueTokens.length; i++) {
+
+			query.term(
+				uniqueTokens[i],
+				{
+					boost: uniqueTokens[i].length >= 2 ? 2 : 1
+				}
+			);
+
+		}
+
+	});
+}
+
+
+/*
+ * --------------------------------------------------------------------------
+ * Result rendering
+ * --------------------------------------------------------------------------
+ */
+
+function displaySearchResults(has_search_text, results, pages) {
+
+	function mergePositions(positions, new_positions) {
+
 		positions = positions.concat(new_positions);
 
 		positions.sort(function (a, b) {
 			return a[0] - b[0];
 		});
 
-		for (
-			var i = 0;
-			i < positions.length - 1;
-			i++
-		) {
+		for (var i = 0; i < positions.length - 1; i++) {
+
 			var pos = positions[i];
 			var pos_next = positions[i + 1];
 
-			if (
-				pos[0] + pos[1] >
-				pos_next[0]
-			) {
+			if (pos[0] + pos[1] > pos_next[0]) {
+
 				pos[1] = Math.max(
 					pos[1],
-					pos_next[0] +
-					pos_next[1] -
-					pos[0]
+					pos_next[0] + pos_next[1] - pos[0]
 				);
 
 				delete positions[i + 1];
-
 				i--;
 			}
 		}
@@ -528,15 +534,15 @@ function displaySearchResults(
 
 
 	var el_search_results =
-		document.getElementById(
-			'search-results'
-		);
+		document.getElementById('search-results');
 
 
-	if (
-		results.length &&
-		has_search_text
-	) {
+	function insert(str, index, value) {
+		return str.substr(0, index) + value + str.substr(index);
+	}
+
+
+	if (results.length && has_search_text) {
 
 		var results_string = '';
 
@@ -548,39 +554,31 @@ function displaySearchResults(
 
 		for (
 			var i = 0;
-			i <
-				results.length &&
-				i <
-				max_results +
-				num_elements_and_properties;
+			i < results.length &&
+			i < max_results + num_elements_and_properties;
 			i++
 		) {
 
-			var item =
-				pages[results[i].ref];
+			var item = pages[results[i].ref];
 
-			var title =
-				item.title;
+			var title = item.title;
 
 			const summary_length = 200;
 
-			var content =
-				item.content;
-
-			var type =
-				item.type;
+			var content = item.content;
+			var type = item.type;
 
 
-			var a_href =
-				'<a href' + '="';
-
+			/*
+			 * Split up the href string so that the offline documentation
+			 * generator does not rewrite the link.
+			 */
+			var a_href = '<a href' + '="';
 
 			var url =
 				a_href +
 				'{{ "" | relative_url }}' +
-				item.url.substr(
-					a_href.length
-				);
+				item.url.substr(a_href.length);
 
 
 			if (type != "page") {
@@ -600,8 +598,7 @@ function displaySearchResults(
 
 
 			for (
-				var query in
-				results[i].matchData.metadata
+				var query in results[i].matchData.metadata
 			) {
 
 				var match_objects =
@@ -613,7 +610,7 @@ function displaySearchResults(
 					content_positions =
 						mergePositions(
 							content_positions,
-							match_objects.content.position
+							match_objects['content'].position
 						);
 				}
 
@@ -623,7 +620,7 @@ function displaySearchResults(
 					title_positions =
 						mergePositions(
 							title_positions,
-							match_objects.title.position
+							match_objects['title'].position
 						);
 				}
 			}
@@ -636,8 +633,7 @@ function displaySearchResults(
 			) {
 
 				var cursor = 0;
-
-				var new_content = '';
+				var new_content = "";
 
 
 				for (
@@ -646,23 +642,17 @@ function displaySearchResults(
 					j++
 				) {
 
-					var pos =
-						positions[j];
-
+					var pos = positions[j];
 
 					if (
 						skip_after_index &&
-						pos[0] >
-						skip_after_index
+						pos[0] > skip_after_index
 					)
 						break;
 
 
 					new_content +=
-						content.slice(
-							cursor,
-							pos[0]
-						) +
+						content.slice(cursor, pos[0]) +
 						'<strong>' +
 						content.slice(
 							pos[0],
@@ -671,13 +661,11 @@ function displaySearchResults(
 						'</strong>';
 
 
-					cursor =
-						pos[0] + pos[1];
+					cursor = pos[0] + pos[1];
 				}
 
 
-				new_content +=
-					content.slice(cursor);
+				new_content += content.slice(cursor);
 
 				return new_content;
 			}
@@ -694,17 +682,13 @@ function displaySearchResults(
 						0,
 						content.lastIndexOf(
 							' ',
-							Math.max(
-								0,
-								first_match - 60
-							)
+							Math.max(0, first_match - 60)
 						)
 					);
 
 
 				var summary_end =
-					first_match +
-					summary_length;
+					first_match + summary_length;
 
 
 				var new_content =
@@ -730,8 +714,7 @@ function displaySearchResults(
 						),
 						i_strong < 0
 							? -1
-							: i_strong +
-								'</strong>'.length
+							: i_strong + '</strong>'.length
 					);
 
 
@@ -747,7 +730,8 @@ function displaySearchResults(
 						summary_end
 					);
 
-			} else {
+			}
+			else {
 
 				content =
 					content.substring(
@@ -784,7 +768,8 @@ function displaySearchResults(
 					title +
 					'’ property</a></h4>';
 
-			} else if (type == "element") {
+			}
+			else if (type == "element") {
 
 				results_string +=
 					'<h4 title="RML element">' +
@@ -794,7 +779,8 @@ function displaySearchResults(
 					title +
 					'&gt; element</a></h4>';
 
-			} else if (type == "pseudo") {
+			}
+			else if (type == "pseudo") {
 
 				results_string +=
 					'<h4 title="Pseudo selector">' +
@@ -804,7 +790,8 @@ function displaySearchResults(
 					title +
 					'’ pseudo selector</a></h4>';
 
-			} else {
+			}
+			else {
 
 				results_string +=
 					'<h4>' +
@@ -812,9 +799,7 @@ function displaySearchResults(
 					title +
 					(
 						item.parent_title
-							? ' (' +
-								item.parent_title +
-								')'
+							? ' (' + item.parent_title + ')'
 							: ''
 					) +
 					'</a></h4>';
@@ -830,37 +815,44 @@ function displaySearchResults(
 
 		results_string +=
 			'<p style="text-align: right">' +
-			'<em>显示 ' +
+			'<em>Showing ' +
 			Math.min(
 				results.length,
-				max_results +
-				num_elements_and_properties
+				max_results + num_elements_and_properties
 			) +
-			' / ' +
+			' of ' +
 			results.length +
-			' 个结果。</em></p>';
+			' ' +
+			(
+				results.length == 1
+					? 'result'
+					: 'results'
+			) +
+			'.</em></p>';
 
 
 		el_search_results.innerHTML =
 			results_string;
 
-	} else if (has_search_text) {
+	}
+	else if (has_search_text) {
 
 		el_search_results.innerHTML =
-			'<p><em>没有找到结果。</em></p>';
+			'<p><em>No results found.</em></p>';
 
-	} else {
+	}
+	else {
 
 		el_search_results.innerHTML =
-			'<p><em>请输入搜索关键词。</em></p>';
+			'<p><em>Please enter a search term above.</em></p>';
 	}
 }
 
 
 /*
- * ============================================================
- * Search interaction
- * ============================================================
+ * --------------------------------------------------------------------------
+ * Search events
+ * --------------------------------------------------------------------------
  */
 
 var el_search_box =
@@ -872,8 +864,10 @@ function doSearch() {
 	var search_term =
 		el_search_box.value;
 
+
 	var results =
-		idx.search(search_term);
+		searchIndex(search_term);
+
 
 	displaySearchResults(
 		Boolean(search_term),
@@ -883,38 +877,40 @@ function doSearch() {
 }
 
 
-document.getElementById(
-	'form-search'
-).addEventListener(
-	"submit",
-	function (e) {
+document
+	.getElementById('form-search')
+	.addEventListener(
+		"submit",
+		function (e) {
 
-		e.preventDefault();
+			e.preventDefault();
 
-		doSearch();
+			doSearch();
 
-		setQueryParam(
-			'q',
-			el_search_box.value,
-			false
-		);
-	}
-);
+			setQueryParam(
+				'q',
+				el_search_box.value,
+				false
+			);
+		}
+	);
 
 
-el_search_box.addEventListener(
-	"input",
-	function (e) {
+document
+	.getElementById('search-box')
+	.addEventListener(
+		"input",
+		function (e) {
 
-		doSearch();
+			doSearch();
 
-		setQueryParam(
-			'q',
-			el_search_box.value,
-			true
-		);
-	}
-);
+			setQueryParam(
+				'q',
+				el_search_box.value,
+				true
+			);
+		}
+	);
 
 
 window.addEventListener(
@@ -936,5 +932,4 @@ el_search_box.value =
 	getQueryParam('q');
 
 doSearch();
-
 </script>
